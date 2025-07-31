@@ -1,0 +1,131 @@
+
+1.ChatServer.java
+
+import java.io.*;
+import java.net.*;
+import java.util.*;
+import java.util.concurrent.*;
+
+public class ChatServer {
+    private static final int PORT = 12345;
+    private static Set<ClientHandler> clientHandlers = ConcurrentHashMap.newKeySet();
+
+    public static void main(String[] args) {
+        System.out.println("Server started...");
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                ClientHandler handler = new ClientHandler(clientSocket, clientHandlers);
+                clientHandlers.add(handler);
+                new Thread(handler).start();
+            }
+        } catch (IOException e) {
+            System.out.println("Error in server: " + e.getMessage());
+        }
+    }
+}
+
+2.ClientHandler.java
+
+import java.io.*;
+import java.net.*;
+import java.util.Set;
+
+public class ClientHandler implements Runnable {
+    private Socket socket;
+    private BufferedReader in;
+    private PrintWriter out;
+    private Set<ClientHandler> clients;
+    private String clientName;
+
+    public ClientHandler(Socket socket, Set<ClientHandler> clients) {
+        this.socket = socket;
+        this.clients = clients;
+
+        try {
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            out = new PrintWriter(socket.getOutputStream(), true);
+            out.println("Enter your name:");
+            clientName = in.readLine();
+            broadcast("📢 " + clientName + " has joined the chat.");
+        } catch (IOException e) {
+            System.out.println("Client handler error: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void run() {
+        String msg;
+
+        try {
+            while ((msg = in.readLine()) != null) {
+                if ("exit".equalsIgnoreCase(msg)) {
+                    break;
+                }
+                broadcast(clientName + ": " + msg);
+            }
+        } catch (IOException e) {
+            System.out.println(clientName + " disconnected.");
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // Ignore
+            }
+            clients.remove(this);
+            broadcast("👋 " + clientName + " left the chat.");
+        }
+    }
+
+    private void broadcast(String message) {
+        for (ClientHandler client : clients) {
+            if (client != this) {
+                client.out.println(message);
+            }
+        }
+    }
+}            
+
+3. ChatClient.java
+
+import java.io.*;
+import java.net.*;
+
+public class ChatClient {
+    private static final String SERVER = "localhost";
+    private static final int PORT = 12345;
+
+    public static void main(String[] args) {
+        try (
+            Socket socket = new Socket(SERVER, PORT);
+            BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true)
+        ) {
+            // Thread to read messages from server
+            Thread readerThread = new Thread(() -> {
+                String serverMsg;
+                try {
+                    while ((serverMsg = in.readLine()) != null) {
+                        System.out.println(serverMsg);
+                    }
+                } catch (IOException e) {
+                    System.out.println("Disconnected from server.");
+                }
+            });
+            readerThread.start();
+
+            // Read messages from user input
+            String userMsg;
+            while ((userMsg = input.readLine()) != null) {
+                out.println(userMsg);
+                if ("exit".equalsIgnoreCase(userMsg)) break;
+            }
+
+        } catch (IOException e) {
+            System.out.println("Connection error: " + e.getMessage());
+        }
+    }
+}
+
